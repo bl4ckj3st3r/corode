@@ -1,38 +1,41 @@
 # corode-core
 
-**Motto:** Isolation statt Abstraktion. Determinismus statt Chaos.
+**Isolation statt Abstraktion. Determinismus statt Interrupt. Harmonie statt Krieg.**
 
-`corode-core` ist ein von Grund auf neu entwickelter, in Rust geschriebener Bare-Metal-Kernel für die RISC-V-Architektur. Unser Ziel ist es, ein beweisbar sicheres und deterministisches System zu schaffen, indem wir die Hardware-Sicherheitsfeatures der CPU (Physical Memory Protection) als primäres Ordnungsprinzip nutzen.
-
-## Kernprinzipien
-
-*   **Hardware-Sozialdemokratie:** Der physische Speicher ist in 16 unveränderliche, hardware-gesicherte "Vektoren" aufgeteilt. Jeder System-Komponente wird genau der Speicher zugewiesen, den sie zum Überleben braucht – nicht mehr und nicht weniger. Die Gesetze sind in Silizium gegossen.
-*   **Isolation statt Abstraktion:** Wir vermeiden komplexe Software-Abstraktionen. Stattdessen erzwingen wir eine strikte Isolation direkt auf der Hardware-Ebene mittels RISC-V PMP.
-*   **Conditions statt Prozesse:** Unser Ausführungsmodell basiert auf `Conditions` – zustandslose, überprüfbare Code-Einheiten, deren Korrektheit vor der Ausführung durch einen SMT-Solver (wie Z3) bewiesen werden kann.
-
-## Aktueller Status: Meilenstein 1 ✅
-
-Das Fundament ist fertig, stabil und bewiesen.
-
-1.  **Stabiler Kernel-Prototyp:** Der `corode-core` Kernel (`src/main.rs`) bootet, konfiguriert die Hardware-Firewall (PMP) und übernimmt die vollständige Systemkontrolle.
-2.  **Hardware-Firewall Aktiv:** Alle 16 Speicher-Vektoren sind gemäß unserer Verfassung (`docs/PMP_VEKTOR_MAP.md`) konfiguriert und versiegelt.
-3.  **Sicherheit Bewiesen:** Ein integrierter Selbsttest beweist zur Boot-Zeit, dass die PMP-Schilde halten und das System selbst Angriffe von innen abwehrt.
-
-## Nächste Schritte
-
-Die nächsten Schritte sind in unserer Roadmap klar definiert:
-
-1.  **Sidekernel-Integration:** Implementierung der Kommunikationsprotokolle für die gekapselten Sidekernels (AI, Linux-Treiber, Unix-Userland).
-2.  **Z3³-Speicherlogistik:** Vollständige Implementierung des BlockID-basierten Speichermodells.
-
-## Dokumentation
-
-*   **[Repository-Struktur](docs/REPOSITORY_STRUCTURE.md):** Eine Landkarte des Projekts.
-*   **[PMP Vektor-Karte](docs/PMP_VEKTOR_MAP.md):** Die "Verfassung" unseres Systems, die die Speicheraufteilung definiert.
-*   **[Easter Eggs](docs.EASTEREGGS.md):** Die kulturelle Seele des Projekts.
+[![Lizenz: GPL v3](https://img.shields.io/badge/Lizenz-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ---
 
-**The Pink Hacker Boy**  
-Eifel, 2026  
-💖🎒🤡🥚😎
+`corode-core` ist kein weiteres Betriebssystem. Es ist der Versuch, die seit 80 Jahren etablierte Von-Neumann-Architektur zu Ende zu denken und ihre fundamentalen Probleme zu lösen. Anstatt Prozesse um knappe Ressourcen kämpfen zu lassen, etabliert `corode-core` eine beweisbare Ordnung, die vor der Ausführung mathematisch sicherstellt, dass keine Konflikte entstehen.
+
+**Race Conditions sind hier nicht nur selten. Sie sind unmöglich.**
+
+## Das Kernprinzip: Das Condition Paradigma
+
+Alles im System ist eine **Condition**: ein isolierter, vollständig aufgelöster, deterministisch ausführbarer Zustand. Eine Condition existiert nur, wenn ihre Existenz formal bewiesen werden kann. Sie läuft in einem eigenen, durch Hardware (RISC-V PMP) geschützten Speicherbereich und verschwindet, wenn ihre Aufgabe erfüllt ist.
+
+- **Kein Kampf:** Ressourcen werden nicht zur Laufzeit verhandelt, sondern zur Compile-Zeit im **Manifest** festgeschrieben.
+- **Kein Chaos:** Es gibt keinen Scheduler, der Entscheidungen trifft. Das System fließt nach den im Manifest bewiesenen Regeln.
+- **Kein Raten:** Der Z3 SMT Solver beweist die Korrektheit jeder Condition, bevor sie entsteht.
+
+## Aktueller Status: Genesis
+
+Das Projekt befindet sich im `Genesis`-Stadium. Der erste, lauffähige Code existiert in `main.rs` auf bare-metal RISC-V. Dieser "Genesis-Commit" beweist die grundlegende Machbarkeit des Konzepts:
+
+- **Kompilierung:** `no_std` und `no_main` sind umgesetzt.
+- **Hardware-Isolation:** Physische Speicherprotektion (PMP) ist konzeptionell verankert.
+- **Stabilität:** Ein erster Trap-Handler ("Harlekin") fängt bereits Zugriffsverletzungen ab und verhindert den Systemabsturz.
+
+## Die Roadmap
+
+Die vollständige Vision ist in der [ROADMAP.md](ROADMAP.md) detailliert. Die nächsten Meilensteine sind:
+
+1.  **Phase 1: Beweisbare Stabilität:** Vollständige Implementierung der PMP-isolierten Speicherarchitektur und des fälschungssicheren "Trickster"-Loggers.
+2.  **Phase 2: Infrastruktur:** Aufbau der `Z3³`-Speicherlogistik und des `SLS`-Speichersystems für maximale CPU-Sättigung.
+3.  **Phase 3: Intelligenz:** Entwicklung des "Quarantäne Neural Network" zur automatischen Fehleranalyse und des "Weightless Agent Training" für autonome Systemoptimierung.
+
+## Die Philosophie: Hardware-Sozialdemokratie
+
+Jede Condition hat das Recht auf Existenz, solange ihre Anforderungen die Systemstabilität nicht gefährden. Sie erhält ihren festen Platz, darf nicht mehr beanspruchen, ist aber sicher, dass sie ihren Raum bekommt. Das ist keine technische, sondern eine philosophische Entscheidung gegen das "Survival of the Fittest"-Prinzip klassischer Betriebssysteme.
+
+Dieses Projekt ist Open Source (GPLv3) und wird von der **Trickster IT SE** vorangetrieben.
