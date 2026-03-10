@@ -1,21 +1,13 @@
 [package]
-name = "corode-core"
+name = "trickster-core"
 version = "0.1.0"
 edition = "2021"
 
 [profile.dev]
 panic = "abort"
 opt-level = 0
-lto = false
 
 [profile.release]
 panic = "abort"
 opt-level = 3
 lto = true
-
-[profile.bench]
-panic = "abort"
-
-# KEINE externen Crates außer für Tests
-[dependencies]
-# bleib leer – alles selbst geschrieben

@@ -1,9 +1,0 @@
-[target.riscv64gc-unknown-none-elf]
-linker = "rust-lld"
-rustflags = [
-    "-C", "link-arg=-Tlinker.ld",
-    "-C", "target-feature=+c"
-]
-
-[build]
-target = "riscv64gc-unknown-none-elf"
