@@ -1,43 +1,44 @@
-# Corode - Technische Dokumentation
+# Corode Dokumentation
 
-## 1. Vision: Ein beweisbar korrektes Betriebssystem
+## Übersicht
 
-Corode ist der Versuch, ein Betriebssystem zu schaffen, dessen Verhalten nicht nur getestet, sondern formal bewiesen wird. Anstatt auf komplexe, zur Laufzeit getroffene Entscheidungen (wie Scheduling oder dynamische Speicherverwaltung) zu setzen, wird das gesamte Systemverhalten zur Compile-Zeit in einem **Manifest** definiert und mit einem SMT-Solver (wie Z3) auf Korrektheit und Stabilität überprüft.
+Corode ist ein experimenteller Bare-Metal-Kernel für RISC-V, geschrieben in Rust. Das Projekt legt den Fokus auf eine minimale Codebasis und eine nachvollziehbare Architektur, die ohne externe Abhängigkeiten auskommt.
 
-## 2. Das Kernkonzept: Die Condition
+## Build & Test
 
-Alles im System ist eine **Condition**: ein isolierter, vollständig aufgelöster, deterministisch ausführbarer Zustand. Eine Condition ist der atomare Baustein des Systems.
+Das Projekt verwendet `nix-shell`, um eine reproduzierbare und stabile Build-Umgebung zu gewährleisten.
 
-- **Isolation:** Jede Condition läuft in einem eigenen, durch Hardware (RISC-V PMP) geschützten Speicherbereich.
-- **Determinismus:** Der Code einer Condition ist einfach und in seiner Ausführungszeit vorhersagbar. Er hat keinen Zugriff auf blockierende Operationen oder komplexe Schleifen.
-- **Formale Verifikation:** Eine Condition "existiert" nur, wenn ihre Anforderungen (Speicher, Rechenzeit, Zugriff auf andere Conditions) die im Manifest festgelegten Systemregeln nicht verletzen.
+1.  **Umgebung betreten:**
+    ```bash
+    nix-shell
+    ```
 
-## 3. Genesis-Implementierung: Der erste lauffähige Beweis
+2.  **Kompilieren:**
+    ```bash
+    cargo build --bin corode-core --target riscv64gc-unknown-none-elf
+    ```
 
-Das aktuelle System (`main.rs`) ist die "Genesis"-Implementierung. Es beweist die grundlegende Machbarkeit auf Bare-Metal-RISC-V.
+3.  **In QEMU testen:**
+    ```bash
+    qemu-system-riscv64 -machine virt -nographic -kernel target/riscv64gc-unknown-none-elf/debug/corode-core
+    ```
 
-### Komponenten
+## Troubleshooting
 
-- **`main.rs` (`kmain`)**: Der Einstiegspunkt nach dem Bootloader. Initialisiert die UART, richtet eine grundlegende PMP-Region ein und startet die deterministische Hauptschleife.
-- **`state.rs` (`CoreState`)**: Hält den globalen Zustand des Cores, im Wesentlichen die `CondMask`, eine Bitmaske, die anzeigt, welche Conditions gerade aktiv sind.
-- **`cond.rs` (`CondMask`, `id`)**: Definiert die Bitmaske für Conditions und weist jeder benannten Condition eine eindeutige ID (eine Bit-Position) zu.
-- **`block.rs` (`Block`, `run_blocks`)**:
-    - Ein `Block` ist die praktische Implementierung einer Zustandsänderung. Er enthält die auszuführende Funktion (`run`) und die Bedingungen (`require_all`, `require_none`), unter denen er laufen darf.
-    - Die Funktion `run_blocks` ist das Herz des Systems. In einer Endlosschleife iteriert sie über alle statisch definierten `BLOCKS` und führt diejenigen aus, deren Bedingungen durch die aktuelle `CondMask` im `CoreState` erfüllt sind. Dies ist der "Scheduler" – vollständig deterministisch und ohne Priorisierung.
-- **`pmp.rs`**: Funktionen zur Konfiguration der Physical Memory Protection (PMP) von RISC-V. Dies ist die Hardware-Grundlage für die Isolation von Conditions.
-- **`uart.rs`**: Einfache, Polling-basierte UART-Treiber für die serielle Ausgabe.
-- **`trap.rs`**: Eine rudimentäre Trap-Handler-Struktur, die aktuell noch keine Funktion hat.
+Bei der Entwicklung traten einige spezifische Build-Fehler auf, die hier dokumentiert sind.
 
-### Systemablauf (Genesis)
+### 1. Linker-Fehler (`GLIBC_... not found`)
 
-1.  **`kmain`**:
-    - Initialisiert UART.
-    - Richtet eine globale PMP-Region ein, die den gesamten Speicher für den Kernel freigibt.
-    - Erstellt einen neuen `CoreState`.
-    - Setzt die initiale Condition `PMP_OK`.
-2.  **`loop` in `kmain`**:
-    - Ruft `run_blocks` auf.
-    - `run_blocks` prüft alle `BLOCKS` in der statischen `BLOCKS`-Tabelle.
-    - Der `boot_done`-Block wird ausgeführt, da seine Bedingung (`require_none: BOOT_DONE`) erfüllt ist. Er setzt die `BOOT_DONE`-Condition.
-    - In der nächsten Iteration wird der `boot_done`-Block nicht mehr ausgeführt.
-    - Das System verbleibt in diesem stabilen, leeren Zustand und wartet auf externe Interrupts (die noch nicht implementiert sind), um neue Conditions zu setzen.
+*   **Problem:** Beim Kompilieren traten Fehler auf, die auf inkompatible Versionen der `GLIBC`-Systembibliothek hindeuteten. Zum Beispiel: `error adding symbols: DSO missing from command line` oder `/nix/store/.../bin/ld: ...: version 'GLIBC_2.34' not found (required by ...)`.
+
+*   **Ursache:** Die Entwicklungsumgebung mischte Werkzeuge (wie `clang`, `ld`) aus dem System mit denen, die von Nix temporär bereitgestellt wurden. Dies führte zu Versionskonflikten bei essenziellen Bibliotheken.
+
+*   **Lösung:** Die Einführung einer `shell.nix`-Datei. Diese Datei definiert eine **vollständig isolierte** Build-Umgebung, in der alle Werkzeuge (`rustc`, `cargo`, `qemu`, `binutils`, `gcc`) aus einer konsistenten Quelle stammen und garantiert zueinander passen. Anstatt Werkzeuge in die Umgebung zu laden, betreten wir eine saubere, dafür vorgesehene Umgebung.
+
+### 2. Linker-Fehler (`duplicate symbol: _start`)
+
+*   **Problem:** Der Build schlug mit der Meldung fehl, dass das `_start`-Symbol mehrfach definiert sei.
+
+*   **Ursache:** Sowohl die Rust-Einstiegsfunktion in `src/main.rs` (`#[no_mangle] pub extern "C" fn _start()`) als auch die Assembler-Datei `src/trap.S` definierten ein `_start`-Label. Der Linker wusste nicht, welcher Einstiegspunkt der richtige ist.
+
+*   **Lösung:** Entfernung des gesamten `_start`-Blocks aus der Assembler-Datei `src/trap.S`. Der einzige und korrekte Einstiegspunkt wird nun in `src/main.rs` definiert, wo auch der Stack-Pointer initialisiert wird.

@@ -1,51 +1,38 @@
-use crate::cond::{id, CondMask};
+//! Blocks – Code, der auf bestimmte Conditions reagiert
+
+use crate::cond::CondMask;
 use crate::state::CoreState;
-use crate::uart::uart_puts;
 
+/// Ein `Block` ist eine Funktion, die ausgeführt wird, wenn eine bestimmte
+/// Kombination von Conditions (`mask`) erfüllt ist.
 pub struct Block {
+    #[allow(dead_code)]
     pub name: &'static str,
-    pub conditions: CondMask,
-    pub body: fn(&mut CoreState),
+    pub mask: CondMask,
+    pub func: fn(&mut CoreState),
 }
 
-fn block_pmp_ok(state: &mut CoreState) {
-    uart_puts("  [block] pmp ok\n");
-    state.set_cond(id::BOOT_DONE);
-}
-
-fn block_boot_done(_state: &mut CoreState) {
-    uart_puts("  [block] boot done\n");
-    // EASTER EGG: US-Hymne nach erfolgreichem Booten
-    // "My country, 'tis of thee, Sweet land of liberty, of thee I sing;"
-    uart_puts("\nMy country, 'tis of thee,\nSweet land of liberty,\nOf thee I sing;\n\n");
-}
-
-fn block_timer_tick(_state: &mut CoreState) {
-    uart_puts("  [block] tick\n");
-}
-
-pub static BLOCKS: &[Block] = &[
-    Block {
-        name: "pmp_ok",
-        conditions: CondMask::from_bit(id::PMP_OK),
-        body: block_pmp_ok,
-    },
-    Block {
-        name: "boot_done",
-        conditions: CondMask::from_bit(id::BOOT_DONE),
-        body: block_boot_done,
-    },
-    Block {
-        name: "timer_tick",
-        conditions: CondMask::from_bit(id::TIMER_TICK),
-        body: block_timer_tick,
-    },
+/// Eine globale Liste aller Blöcke im System.
+/// In einem echten System würde diese Liste dynamisch verwaltet.
+pub const BLOCKS: &[Block] = &[
+    // -- Beispiel-Block --
+    // Block {
+    //     name: "Handle Timer Tick",
+    //     mask: crate::cond::TIMER_TICK,
+    //     func: |state| {
+    //         // Logik, die bei einem Timer-Tick ausgeführt wird.
+    //         state.conds &= !crate::cond::TIMER_TICK; // Condition als "verbraucht" markieren
+    //     }
+    // },
 ];
 
-pub fn run_blocks(blocks: &[Block], state: &mut CoreState) {
-    for block in blocks {
-        if state.conds.contains_all(block.conditions) {
-            (block.body)(state);
+/// Führt alle Blöcke aus, deren `mask` im aktuellen Zustand `state.conds` erfüllt ist.
+#[allow(dead_code)]
+pub fn run_blocks(state: &mut CoreState) {
+    for block in BLOCKS {
+        // Prüfe, ob alle Bits der Maske in den Conditions gesetzt sind.
+        if (state.conds & block.mask) == block.mask {
+            (block.func)(state);
         }
     }
 }

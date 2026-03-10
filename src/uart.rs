@@ -1,60 +1,77 @@
-use core::ptr::{read_volatile, write_volatile};
+//! Einfacher UART-Treiber für Debug-Ausgaben (QEMU virt)
 
-// UART-Registeradressen für das SiFive HiFive1 Board (FE310-G002)
-const UART0_BASE: usize = 0x10020000;
-const UART0_TXDATA: *mut u32 = (UART0_BASE + 0x00) as *mut u32;
-const UART0_RXDATA: *const u32 = (UART0_BASE + 0x04) as *const u32;
+use core::ptr;
+use core::fmt::{self, Write};
 
-// ANSI Escape Codes für Farben
-const PINK_COLOR: &'static str = "\x1b[95m";
-const RESET_COLOR: &'static str = "\x1b[0m";
-static mut PINK_MODE_ENABLED: bool = false;
+const UART_BASE: usize = 0x10000000; // Basisadresse für QEMU virt-Maschine
+const UART_THR: *mut u8 = (UART_BASE + 0) as *mut u8; // Transmitter Holding Register
+const UART_LSR: *mut u8 = (UART_BASE + 5) as *mut u8; // Line Status Register
+const LSR_THRE: u8 = 1 << 5; // Transmitter Holding Register Empty
 
-fn tx_fifo_full() -> bool {
-    // Das MSB des TXDATA-Registers zeigt an, ob der FIFO voll ist
-    unsafe { read_volatile(UART0_TXDATA) & 0x80000000 != 0 }
+/// Initialisiert die UART (für QEMU ist hier nichts zu tun).
+pub fn init() {
+    // Bei echter Hardware müsste hier die Baudrate etc. konfiguriert werden.
 }
 
-fn uart_putc(c: u8) {
-    // Warten, bis im FIFO Platz ist
-    while tx_fifo_full() {}
-    unsafe { write_volatile(UART0_TXDATA, c as u32) };
+/// Schreibt ein einzelnes Byte an die UART.
+pub fn uart_putc(c: u8) {
+    unsafe {
+        // Warte, bis das Senderegister leer ist.
+        while (ptr::read_volatile(UART_LSR) & LSR_THRE) == 0 {}
+        // Schreibe das Byte in das Senderegister.
+        ptr::write_volatile(UART_THR, c);
+    }
 }
 
+/// Schreibt einen String an die UART.
 pub fn uart_puts(s: &str) {
-    unsafe {
-        if PINK_MODE_ENABLED {
-            for byte in PINK_COLOR.as_bytes() {
-                uart_putc(*byte);
-            }
+    for byte in s.bytes() {
+        // Füge nach jedem Newline ein Carriage Return hinzu, wie es Terminals erwarten.
+        if byte == b'\n' {
+            uart_putc(b'\r');
         }
-    }
-
-    for byte in s.as_bytes() {
-        uart_putc(*byte);
-    }
-
-    unsafe {
-        if PINK_MODE_ENABLED {
-            for byte in RESET_COLOR.as_bytes() {
-                uart_putc(*byte);
-            }
-        }
+        uart_putc(byte);
     }
 }
 
-pub fn uart_getc() -> Option<u8> {
-    let rxdata = unsafe { read_volatile(UART0_RXDATA) };
-    if rxdata & 0x80000000 == 0 {
-        // Das LSB des RXDATA-Registers enthält das empfangene Byte
-        Some((rxdata & 0xFF) as u8)
-    } else {
-        None
+// --- Hilfskonstrukt für das `write!`-Makro --- 
+
+/// Ein Writer, der formatierte Argumente direkt in die UART schreibt.
+#[allow(dead_code)]
+pub struct UartWriter;
+
+impl Write for UartWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        uart_puts(s);
+        Ok(())
     }
 }
 
-pub fn set_pink_mode(enabled: bool) {
-    unsafe {
-        PINK_MODE_ENABLED = enabled;
+/// Ein Writer, der in einen Puffer schreibt, nützlich für `panic`.
+pub struct BufferWriter<'a> {
+    buffer: &'a mut [u8],
+    cursor: usize,
+}
+
+impl<'a> BufferWriter<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        BufferWriter { buffer, cursor: 0 }
+    }
+
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.buffer[..self.cursor]).unwrap_or("")
+    }
+}
+
+impl<'a> Write for BufferWriter<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = &mut self.buffer[self.cursor..];
+        let len = core::cmp::min(bytes.len(), remaining.len());
+        
+        remaining[..len].copy_from_slice(&bytes[..len]);
+        self.cursor += len;
+        
+        Ok(())
     }
 }

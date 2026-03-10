@@ -1,2 +1,9 @@
 [target.riscv64gc-unknown-none-elf]
-rustflags = [ "-C", "link-arg=-T./memory.x", "-C", "link-arg=-L./target/riscv64gc-unknown-none-elf/debug" ]
+linker = "rust-lld"
+rustflags = [
+    "-C", "link-arg=-Tlinker.ld",
+    "-C", "target-feature=+c"
+]
+
+[build]
+target = "riscv64gc-unknown-none-elf"

@@ -1,117 +1,148 @@
-'''
-// src/memory/mod.rs
+//! 15 feste Cages à 64KB, jede mit eigener PMP-Region
 
-pub mod vector_alloc;
+use crate::pmp::{self, PmpRegion, PmpFlags};
+use core::cell::UnsafeCell;
 
-use crate::pmp;
-use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::null_mut;
-
-// --- ZUSE: Deterministisches Vektor-Speicher-Management ---
-
-// Anzahl der verfügbaren Speicher-Käfige. Wir reservieren 15, da PMP-Region 0 für den Kernel ist.
-const NUM_CAGES: usize = 15;
-
-// Größe jedes Käfigs: 64 KB. Muss eine Potenz von 2 sein.
-const CAGE_SIZE: usize = 64 * 1024;
-
-// Die Basisadresse, ab der die Käfige beginnen.
-const CAGES_BASE_ADDR: u64 = 0x90000000;
-
-// Der globale Allokator wird unser ZuseAllocator sein.
-#[global_allocator]
-static ALLOCATOR: ZuseAllocator = ZuseAllocator::new();
-
-/// Initialisiert den globalen Zuse-Allokator.
-/// Muss einmalig beim Systemstart aufgerufen werden.
-pub fn init() {
-    // Diese `unsafe` Operation ist notwendig, um die `init`-Methode auf dem
-    // statischen Allokator aufzurufen. Sie ist sicher, weil wir sie hier,
-    // am Anfang des Kernel-Hauptprogramms, einmalig und ohne konkurrierende
-    // Zugriffe ausführen.
-    unsafe {
-        let allocator = &mut *(&ALLOCATOR as *const ZuseAllocator as *mut ZuseAllocator);
-        allocator.init();
-    }
-}
-
-// Repräsentiert einen einzelnen Speicher-Käfig.
-struct Cage {
-    base_addr: u64, // Startadresse des Käfigs
-    pmp_region: usize,  // Zugeordnete PMP-Region (1-15)
-    is_allocated: bool, // Ist der Käfig belegt?
-}
-
-// Der "Zuse" Block-Allokator
-pub struct ZuseAllocator {
-    cages: [Cage; NUM_CAGES],
-}
-
-impl ZuseAllocator {
-    pub const fn new() -> Self {
-        // Erzeugt die Liste der Käfige zur Compile-Zeit.
-        let mut cages = [Cage::new_const(0,0); NUM_CAGES];
-        let mut i = 0;
-        while i < NUM_CAGES {
-            cages[i] = Cage::new_const(
-                CAGES_BASE_ADDR + (i * CAGE_SIZE) as u64,
-                i + 1 // PMP-Regionen 1 bis 15
-            );
-            i += 1;
-        }
-        Self { cages }
-    }
-
-    pub fn init(&mut self) {
-        // Initialisiert den Zustand der Käfige beim Systemstart.
-        for i in 0..NUM_CAGES {
-            self.cages[i].is_allocated = false;
-            // WICHTIG: Sicherstellen, dass alle PMP-Regionen anfangs gesperrt sind.
-            pmp::disable_region(self.cages[i].pmp_region);
-        }
-    }
+/// Ein Cage: 64KB fester, isolierter Speicherblock
+#[derive(Debug, Clone, Copy)]
+pub struct Cage {
+    #[allow(dead_code)]
+    pub id: u8,
+    pub base_addr: usize, // Renamed from base to be more descriptive
+    pub size: usize,
+    pub in_use: bool,
 }
 
 impl Cage {
-    const fn new_const(base_addr: u64, pmp_region: usize) -> Self {
+    pub const fn new(id: u8, base_addr: usize) -> Self {
         Self {
+            id,
             base_addr,
-            pmp_region,
-            is_allocated: false,
+            size: 65536, // 64KB fix
+            in_use: false,
         }
     }
 }
 
-unsafe impl GlobalAlloc for ZuseAllocator {
-    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
-        let self_mut = &mut *(self as *const Self as *mut Self);
+/// Zuse-Allokator – interior mutability für &self-Methoden
+pub struct ZuseAllocator {
+    cages: UnsafeCell<[Cage; 15]>,
+    free_mask: UnsafeCell<u16>,  // Bit 0-14 = Cage 0-14 frei?
+}
 
-        for i in 0..NUM_CAGES {
-            if !self_mut.cages[i].is_allocated {
-                self_mut.cages[i].is_allocated = true;
-                pmp::set_pmp_napot(
-                    self_mut.cages[i].pmp_region,
-                    self_mut.cages[i].base_addr,
-                    CAGE_SIZE as u64,
-                    pmp::READ | pmp::WRITE | pmp::EXEC,
-                );
-                return self_mut.cages[i].base_addr as *mut u8;
-            }
+// Um ZUSE als globale statische Variable zu verwenden, muss Sync implementiert sein.
+// Da unser Kernel single-threaded ist, können wir dies sicher tun.
+// UnsafeCell ist nicht Sync, daher müssen wir diese manuelle Implementierung vornehmen.
+unsafe impl Sync for ZuseAllocator {}
+
+impl ZuseAllocator {
+    pub const fn new() -> Self {
+        const CAGES_BASE_ADDR: usize = 0x90000000; // Startadresse für Cages
+        const CAGE_SIZE: usize = 65536;
+
+        // Die Initialisierung von const-Arrays ist in Rust etwas umständlich.
+        // Wir müssen es manuell tun, anstatt eine Schleife zu verwenden.
+        let cages = [
+            Cage::new(0, CAGES_BASE_ADDR + 0 * CAGE_SIZE),
+            Cage::new(1, CAGES_BASE_ADDR + 1 * CAGE_SIZE),
+            Cage::new(2, CAGES_BASE_ADDR + 2 * CAGE_SIZE),
+            Cage::new(3, CAGES_BASE_ADDR + 3 * CAGE_SIZE),
+            Cage::new(4, CAGES_BASE_ADDR + 4 * CAGE_SIZE),
+            Cage::new(5, CAGES_BASE_ADDR + 5 * CAGE_SIZE),
+            Cage::new(6, CAGES_BASE_ADDR + 6 * CAGE_SIZE),
+            Cage::new(7, CAGES_BASE_ADDR + 7 * CAGE_SIZE),
+            Cage::new(8, CAGES_BASE_ADDR + 8 * CAGE_SIZE),
+            Cage::new(9, CAGES_BASE_ADDR + 9 * CAGE_SIZE),
+            Cage::new(10, CAGES_BASE_ADDR + 10 * CAGE_SIZE),
+            Cage::new(11, CAGES_BASE_ADDR + 11 * CAGE_SIZE),
+            Cage::new(12, CAGES_BASE_ADDR + 12 * CAGE_SIZE),
+            Cage::new(13, CAGES_BASE_ADDR + 13 * CAGE_SIZE),
+            Cage::new(14, CAGES_BASE_ADDR + 14 * CAGE_SIZE),
+        ];
+        
+        Self {
+            cages: UnsafeCell::new(cages),
+            free_mask: UnsafeCell::new(0x7FFF), // Alle 15 Cages frei (Bits 0-14)
         }
-        null_mut()
     }
+    
+    /// Allokiere einen freien Cage
+    pub fn allocate_cage(&self) -> Option<Cage> {
+        let free_mask_ptr = self.free_mask.get();
+        let current_mask = unsafe { *free_mask_ptr };
 
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        let addr = ptr as u64;
-        let self_mut = &mut *(self as *const Self as *mut Self);
-
-        for i in 0..NUM_CAGES {
-            if self_mut.cages[i].base_addr == addr {
-                pmp::disable_region(self_mut.cages[i].pmp_region);
-                self_mut.cages[i].is_allocated = false;
-                return;
-            }
+        if current_mask == 0 {
+            return None; // Kein freier Cage
         }
+        
+        // Finde das niedrigste gesetzte Bit (den ersten freien Cage)
+        let id = current_mask.trailing_zeros() as u8;
+        if id >= 15 {
+            return None; // Sollte nicht passieren, wenn current_mask != 0
+        }
+        
+        let cages_ptr = self.cages.get();
+
+        unsafe {
+            // Cage als belegt markieren
+            (*cages_ptr)[id as usize].in_use = true;
+            *free_mask_ptr &= !(1 << id);
+        
+            // PMP-Region für diesen Cage konfigurieren
+            let cage = (*cages_ptr)[id as usize];
+            let pmp_region = PmpRegion {
+                index: id + 1, // PMP-Region 0 ist für den Kernel reserviert
+                address: cage.base_addr,
+                size: cage.size,
+                flags: PmpFlags::READ as u8 | PmpFlags::WRITE as u8,
+            };
+            
+            // PMP in Hardware setzen (Fehler wird hier ignoriert)
+            let _ = pmp::set_region_napot(&pmp_region);
+            
+            Some(cage)
+        }
+    }
+    
+    /// Cage freigeben
+    #[allow(dead_code)]
+    pub fn deallocate_cage(&self, id: u8) -> bool {
+        if id >= 15 {
+            return false;
+        }
+
+        let cages_ptr = self.cages.get();
+        let free_mask_ptr = self.free_mask.get();
+
+        unsafe {
+            if !(*cages_ptr)[id as usize].in_use {
+                return false; // War schon frei
+            }
+
+            // PMP-Region deaktivieren
+            // Wichtig: Index ist id + 1
+            pmp::clear_region(id + 1);
+
+            // Cage freigeben
+            (*cages_ptr)[id as usize].in_use = false;
+            *free_mask_ptr |= 1 << id;
+        }
+
+        true
+    }
+    
+    /// Status aller Cages abfragen
+    #[allow(dead_code)]
+    pub fn status(&self) -> [(u8, bool); 15] {
+        let mut result = [(0, false); 15];
+        let cages = unsafe { &*self.cages.get() };
+        for i in 0..15 {
+            result[i] = (i as u8, cages[i].in_use);
+        }
+        result
     }
 }
-''
+
+// Globale, statische Instanz des Zuse-Allokators.
+// Diese ist der einzige Weg, um auf den Speicher zuzugreifen.
+pub static ZUSE: ZuseAllocator = ZuseAllocator::new();

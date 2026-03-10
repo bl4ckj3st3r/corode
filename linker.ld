@@ -3,11 +3,12 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 128M
+    RAM (rwx) : ORIGIN = 0x80200000, LENGTH = 128M
 }
 
 SECTIONS
 {
+    . = 0x80200000;
     .text : {
         *(.text._start)
         *(.text*)
@@ -24,4 +25,10 @@ SECTIONS
     .bss : {
         *(.bss*)
     } > RAM
+
+    /DISCARD/ : {
+        *(.comment)
+        *(.note*)
+        *(.eh_frame*)
+    }
 }
