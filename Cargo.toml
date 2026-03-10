@@ -1,0 +1,17 @@
+[package]
+name = "corode-core"
+version = "0.1.0"
+edition = "2021"
+
+# =============================================================================
+# 1. Kernel-Abhängigkeiten (für RISC-V Bare-Metal)
+# =============================================================================
+[dependencies]
+
+# =============================================================================
+# 2. Orakel-Abhängigkeiten (Host-Tool für formale Verifikation)
+# Diese werden NICHT in den Kernel kompiliert.
+# =============================================================================
+[dev-dependencies]
+oxiz = "0.1.3"
+num-bigint = "0.4"
