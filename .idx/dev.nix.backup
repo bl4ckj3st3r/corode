@@ -1,0 +1,34 @@
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
+  buildInputs = with pkgs; [
+    # Rust Toolchain
+    rustc
+    cargo
+    rustfmt
+    clippy
+    
+    # Basis-Tools (optional, aber hilfreich)
+    gnumake
+    binutils
+    file
+  ];
+
+  # Umgebungsvariablen
+  shellHook = ''
+    echo "🔥 Corode Entwicklungsumgebung gestartet"
+    echo "📦 Rust: $(rustc --version)"
+    echo "📦 Cargo: $(cargo --version)"
+    
+    # RISC-V Target für Rust
+    rustup target add riscv64gc-unknown-none-elf 2>/dev/null || true
+    
+    # Cargo-Konfiguration für RISC-V (falls nicht vorhanden)
+    mkdir -p .cargo
+    if [ ! -f .cargo/config.toml ]; then
+      echo '[target.riscv64gc-unknown-none-elf]
+linker = "rust-lld"' > .cargo/config.toml
+      echo "✅ Cargo-Konfiguration erstellt"
+    fi
+  '';
+}

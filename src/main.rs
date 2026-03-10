@@ -1,5 +1,8 @@
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
 
 mod block;
 mod cond;
@@ -7,11 +10,15 @@ mod pmp;
 mod state;
 mod trap;
 mod uart;
+mod trickster;
+mod harlekin;
+mod memory;
 
 use core::panic::PanicInfo;
 use crate::uart::{uart_puts, uart_getc, set_pink_mode};
 use crate::state::CoreState;
 use crate::cond::id;
+use alloc::string::String;
 
 // Statischer Puffer für die Terminal-Eingabe
 const CMD_BUFFER_SIZE: usize = 128;
@@ -52,6 +59,12 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
+#[alloc_error_handler]
+fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
+    panic!("allocation error: {:?}", layout)
+}
+
+
 fn handle_terminal_input() {
     if let Some(c) = uart_getc() {
         unsafe {
@@ -67,7 +80,7 @@ fn handle_terminal_input() {
                         } else if cmd == "4711" {
                             uart_puts("Eine Bedingung, die noch nicht gestellt wurde.\n");
                         } else if cmd == "xyzzy" { // Klassiker
-                            uart_puts("Nichts passiert hier.\n");
+                            uart_puts("Nichts passiert hier.\n
                         } else if cmd == "oma" {
                             uart_puts("Oma ist stolz auf dich.\n");
                         } else if cmd == "philosoph" {
@@ -80,6 +93,11 @@ fn handle_terminal_input() {
                         } else if cmd == "pink-jogger-mode-off" {
                             set_pink_mode(false);
                             uart_puts("Pink Jogger Mode deactivated.\n");
+                        } else if cmd == "test_trap" {
+                            uart_puts("Testing trap handler...\n");
+                            // Simulate a Load access fault (cause = 5) at PC 0x12345678
+                            harlekin::handle_trap(5, 0x12345678);
+                            trickster::print_logs();
                         } else {
                              // Normales Echo für unbekannte Befehle
                             uart_puts("Echo: ");
