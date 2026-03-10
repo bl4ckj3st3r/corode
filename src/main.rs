@@ -18,6 +18,7 @@ const PMP_NAPOT: usize = 3 << 3; const PMP_L: usize = 1 << 7;
 const ADDR_VEC_0_THRON: usize = 0x80000000;      // 64KB Kernel
 const ADDR_VEC_1_WAECHTER: usize = 0x80010000;   // 4KB Harlekin
 const ADDR_VEC_2_SCHREIBER: usize = 0x10000000;   // 1MB Logger
+const ADDR_VEC_2_SCHREIBER_END: usize = ADDR_VEC_2_SCHREIBER + (1024 * 1024) -1; // Ende der Logger-Region
 const ADDR_VEC_3_ORAKEL: usize = 0x10010000;    // 1MB Z3
 const ADDR_VEC_5_EXIL: usize = 0x90000000;       // 256MB Turing-Band
 const ADDR_VEC_6_BOTE: usize = 0x80020000;       // 64KB corode-net
@@ -30,21 +31,61 @@ const ADDR_VEC_14_WERKZEUGE: usize = 0x0C000000; // MMIO Bereich
 const ADDR_VEC_15_ZIEL: usize = 0xDEADBEEF;     // Einzelne, gesperrte Adresse
 
 // =============================================================================
-// II. Der Chronist: Trickster
+// II. Der Chronist: Trickster (Globale Singleton Instanz)
 // =============================================================================
-struct Trickster { cursor: *mut u8, }
+struct Trickster {
+    cursor: *mut u8,
+    start_addr: usize,
+    end_addr: usize,
+}
+
+// Globale, zustandsbehaftete Instanz des Loggers.
+// `unsafe` ist hier notwendig, weil wir eine globale, veränderliche Ressource in
+// einer Bare-Metal-Umgebung verwalten.
+static mut GLOBAL_TRICKSTER: Trickster = Trickster {
+    cursor: ADDR_VEC_2_SCHREIBER as *mut u8,
+    start_addr: ADDR_VEC_2_SCHREIBER,
+    end_addr: ADDR_VEC_2_SCHREIBER_END,
+};
+
 impl Trickster {
-    fn new(base_addr: usize) -> Self { Trickster { cursor: base_addr as *mut u8 } }
-    unsafe fn log(&mut self, message: &str) {
-        for &byte in message.as_bytes() {
+    // Holt eine `unsafe` veränderliche Referenz auf den globalen Logger.
+    fn get_global() -> &'static mut Trickster {
+        unsafe { &mut GLOBAL_TRICKSTER }
+    }
+    
+    // Private Log-Funktion, die die zirkuläre Pufferlogik implementiert.
+    fn log_byte(&mut self, byte: u8) {
+        unsafe {
+            // Prüfen, ob der Cursor das Ende erreicht hat.
+            if self.cursor as usize >= self.end_addr {
+                self.cursor = self.start_addr as *mut u8; // Zurück zum Anfang springen.
+            }
             core::ptr::write_volatile(self.cursor, byte);
             self.cursor = self.cursor.add(1);
         }
     }
-    unsafe fn log_hex(&mut self, n: usize) {
+
+    // Öffentliche API zum Loggen einer Zeichenkette.
+    fn log(&mut self, message: &str) {
+        for &byte in message.as_bytes() {
+            self.log_byte(byte);
+        }
+    }
+    
+    // Öffentliche API zum Loggen einer Hex-Zahl.
+    fn log_hex(&mut self, n: usize) {
         let mut temp = n;
         let mut buffer = [0u8; 16];
         let mut i = 15;
+
+        self.log("0x");
+
+        if temp == 0 {
+            self.log_byte(b'0');
+            return;
+        }
+
         loop {
             let digit = (temp % 16) as u8;
             buffer[i] = if digit < 10 { digit + b'0' } else { digit - 10 + b'a' };
@@ -52,10 +93,9 @@ impl Trickster {
             if temp == 0 { break; }
             i -= 1;
         }
-        self.log("0x");
+        
         for &byte in &buffer[i..] {
-            core::ptr::write_volatile(self.cursor, byte);
-            self.cursor = self.cursor.add(1);
+            self.log_byte(byte);
         }
     }
 }
@@ -82,7 +122,7 @@ impl Lcg {
 
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
-    let mut trickster = Trickster::new(ADDR_VEC_2_SCHREIBER);
+    let trickster = Trickster::get_global();
     asm!("csrw mtvec, {}", in(reg) harlekin_trap_handler as usize);
     setup_pmp_vectors();
     
@@ -95,7 +135,7 @@ pub unsafe extern "C" fn _start() -> ! {
         trickster.log("CHAOS-ANOMALIE ENTDECKT! \n  >> Eierschalensollbruchstellenverursacher AKTIVIERT! <<\n");
         trickster.log("INITIIERE OOC-SELBSTANGRIFF...\n");
         core::ptr::write_volatile(ADDR_VEC_15_ZIEL as *mut u32, 0x1337);
-        trickster.log("OOC-SELBSTANGRIFF ABGEFANGEN. SYSTEM FUNKTIONAL.\n");
+        // Die Erfolgsmeldung wird nun vom Harlekin geloggt, da er den Angriff abfängt.
     } else {
         trickster.log("PMP-Schilde oben. Selbsttest ohne Anomalie. System stabil.\n");
     }
@@ -109,7 +149,7 @@ pub unsafe extern "C" fn _start() -> ! {
 #[no_mangle]
 #[repr(align(4))]
 pub unsafe extern "C" fn harlekin_trap_handler() {
-    let mut trickster = Trickster::new(ADDR_VEC_2_SCHREIBER);
+    let trickster = Trickster::get_global();
     let mcause: usize;
     let mepc: usize;
     let mtval: usize;
@@ -119,7 +159,13 @@ pub unsafe extern "C" fn harlekin_trap_handler() {
 
     trickster.log("\n**********************************************\n");
     trickster.log(">> HARLEKIN FÄNGT EINDRINGLING AB! <<\n");
-    trickster.log("   URSACHE (mcause): "); trickster.log_hex(mcause); trickster.log(" (Store access fault)\n");
+    trickster.log("   URSACHE (mcause): "); trickster.log_hex(mcause);
+    // Decode mcause to provide a human-readable reason
+    match mcause {
+        5 => trickster.log(" (Load access fault)\n"),
+        7 => trickster.log(" (Store/AMO access fault)\n"),
+        _ => trickster.log(" (Unknown trap cause)\n"),
+    }
     trickster.log("   ORT (mepc):     "); trickster.log_hex(mepc); trickster.log(" (Befehl, der Fehler auslöste)\n");
     trickster.log("   ZIEL (mtval):   "); trickster.log_hex(mtval); trickster.log(" (Verbotene Speicheradresse)\n");
     trickster.log("**********************************************\n");
