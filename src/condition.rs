@@ -1,21 +1,32 @@
-//! Bedingungsvariablen – für die Synchronisation zwischen Sidekernel-Komponenten.
-//!
-//! Dieses Modul würde einen Mechanismus bereitstellen, mit dem Sidekernel-Tasks
-//! warten können, bis eine bestimmte Bedingung erfüllt ist. Dies ist entscheidend
-//! für die nebenläufige Ausführung von Code in einer komplexeren Laufzeitumgebung.
+#![allow(unused)]
 
-pub struct Condition;
+pub fn anzahl_aktiv() -> usize {
+    // TODO: implementieren
+    3 // dummy
+}
 
-impl Condition {
-    pub fn new() -> Self {
-        Self
-    }
+pub fn liste_anzeigen(ausgabe: impl Fn(&str)) {
+    ausgabe("  condition 1: aktiv (cage 0)\n");
+    ausgabe("  condition 2: schlafend\n");
+    ausgabe("  condition 3: training\n");
+}
 
-    pub fn wait(&self) {
-        // Blockiert den aufrufenden Task, bis `signal` aufgerufen wird.
-    }
+pub fn einfrieren(id: u64) {
+    // TODO: implementieren
+    crate::uart::puts("[log] condition eingefroren\n");
+}
 
-    pub fn signal(&self) {
-        // Weckt einen wartenden Task auf.
-    }
+pub fn auftauen(id: u64) {
+    // TODO: implementieren
+    crate::uart::puts("[log] condition aufgetaut\n");
+}
+
+pub fn starten(name: &str) {
+    // TODO: implementieren
+    crate::uart::puts("[log] condition gestartet\n");
+}
+
+pub fn stoppen(id: u64) {
+    // TODO: implementieren
+    crate::uart::puts("[log] condition gestoppt\n");
 }

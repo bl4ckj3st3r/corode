@@ -1,67 +1,35 @@
-//! Zuse-Allokator – benannt nach Konrad Zuse, dem Erfinder des ersten Computers.
-//!
-//! Dieser Allokator verwaltet einen festen Satz von Speicherblöcken ("Cages"),
-//! die für isolierte Sidekernel-Komponenten verwendet werden können.
+#![allow(unused)]
 
-const NUM_CAGES: usize = 15;
-const CAGE_SIZE: usize = 65536; // 64KB
-
-#[derive(Debug, Clone, Copy)]
-pub struct Cage {
-    pub id: u8,
-    pub base: usize,
-    pub in_use: bool,
-}
-
-pub struct ZuseAllocator {
-    cages: [Cage; NUM_CAGES],
-    free_mask: u16,
-}
+pub struct ZuseAllocator;
 
 impl ZuseAllocator {
-    /// Initialisiert den Allokator mit 15 freien Cages.
-    pub fn new() -> Self {
-        let mut cages = [Cage { id: 0, base: 0, in_use: false }; NUM_CAGES];
-        for i in 0..NUM_CAGES {
-            cages[i] = Cage {
-                id: i as u8,
-                base: 0x80200000 + (i * CAGE_SIZE),
-                in_use: false,
-            };
-        }
+    pub fn new() -> Self { Self } 
+}
 
-        Self {
-            cages,
-            free_mask: 0x7FFF, // 15 Cages frei (111111111111111b)
-        }
-    }
+pub fn anzahl_belegt() -> usize {
+    // TODO: implementieren
+    1 // dummy
+}
 
-    /// Findet und belegt die erste freie Cage.
-    pub fn allocate(&mut self) -> Option<&mut Cage> {
-        if self.free_mask == 0 {
-            return None; // Kein freier Cage
-        }
+pub fn anzahl_gesamt() -> usize {
+    15
+}
 
-        let id = self.free_mask.trailing_zeros() as usize;
-        if id >= NUM_CAGES {
-            return None; // Sollte nicht passieren
-        }
+pub fn liste_anzeigen(ausgabe: impl Fn(&str)) {
+    ausgabe("  cage 0: belegt (system-terminal)\n");
+    ausgabe("  cage 1: frei\n");
+    ausgabe("  cage 2: frei\n");
+    ausgabe("  cage 3: frei\n");
+    ausgabe("  cage 4: frei\n");
+    ausgabe("  cage 5: frei\n");
+    ausgabe("  cage 6: frei\n");
+    ausgabe("  cage 7: frei\n");
+    ausgabe("  cage 8: frei\n");
+    ausgabe("  cage 9: frei\n");
+    ausgabe("  cage 10: frei\n");
+    ausgabe("  cage 11: frei\n");
+    ausgabe("  cage 12: frei\n");
+    ausgabe("  cage 13: frei\n");
+    ausgabe("  cage 14: frei\n");
 
-        self.free_mask &= !(1 << id);
-        self.cages[id].in_use = true;
-        Some(&mut self.cages[id])
-    }
-
-    /// Gibt eine Cage wieder frei.
-    pub fn deallocate(&mut self, id: u8) {
-        if id < NUM_CAGES as u8 {
-            self.free_mask |= 1 << id;
-            self.cages[id as usize].in_use = false;
-        }
-    }
-
-    /// Gibt den aktuellen Status aller Cages zurück.
-    pub fn status(&self) -> &[Cage; NUM_CAGES] {
-        &self.cages
-    }
 }

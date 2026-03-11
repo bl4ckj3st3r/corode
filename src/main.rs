@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+// Module deklarieren
 mod pmp;
 mod uart;
 mod trickster;
@@ -8,56 +9,43 @@ mod zuse;
 mod sidekernel;
 mod condition;
 mod terminal;
-mod commands;
 
 use core::arch::asm;
-use crate::sidekernel::Sidekernel;
-use crate::terminal::TerminalCondition;
+use crate::terminal::system_terminal::SystemTerminal;
 
-// Die Nachricht der L0-Trap-Condition, sicher in einer isolierten Speicherregion.
 #[link_section = ".vault"]
-static TRICKSTER_MESSAGE: &[u8] = b"\x1B[2J\x1B[H\n\r\
-    *** TRICKSTER SAGT NEIN, BRO! ***\n\r\
-    Zugriffsverletzung erkannt.\n\r\
-    Der Vault ist versiegelt.\n\r\
-    Komm besser wieder, wenn du gelernt hast.\n\r";
+static TRICKSTER_MESSAGE: &[u8] = b"\x1B[2J\x1B[H\n\rTRICKSTER SAGT NEIN, BRO!\n\r";
 
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
-    // Phase 1: Genesis-Condition initialisiert das System.
-
-    // 1. Lease der UART-Ressource für Logging.
+    // 1. Init
     uart::init();
-    uart::puts("Corode Genesis-Condition startet...\n");
-    
-    // 2. PMP-Hardware für Cage-Isolation konfigurieren.
     pmp::init();
-    uart::puts("PMP-Grenzen für Cages definiert.\n");
-    
-    // 3. L0-Trap-Condition (trickster_handler) registrieren.
     asm!("csrw mtvec, {}", in(reg) trickster::trickster_handler as usize);
-    uart::puts("L0-Trap-Condition registriert.\n");
-    
-    // 4. Rent-A-Bunch-System (ZuseAllocator) initialisieren.
-    let _zuse = zuse::ZuseAllocator::new();
-    uart::puts("Rent-A-Bunch-System (Zuse) bereit.\n");
-    
-    // 5. Platzhalter für den Training Side Kernel starten.
-    let _sidekernel = Sidekernel::new();
-    uart::puts("Training Side Kernel (Platzhalter) aktiv.\n");
 
-    // Phase 2: System an die L2-Terminal-Condition übergeben.
-    uart::puts("System bereit. Übergebe an L2-Terminal-Condition.\n");
-    let terminal = TerminalCondition::new();
-    terminal.run(); // Diese Funktion enthält die Hauptschleife.
-    
-    // Nach der Übergabe an das Terminal sollte dieser Punkt nicht erreicht werden.
-    loop {}
+    // 2. System-Terminal starten
+    let mut terminal = SystemTerminal::neue();
+    terminal.ausführen();
+
+    // Diese Schleife wird durch terminal.ausführen() ersetzt
+    // loop {
+    //     unsafe { core::arch::asm!("wfi"); }
+    // }
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    // Ein Panic würde der Corode-Philosophie der garantierten Ausführung widersprechen.
-    // In einem reifen System würde dies eine spezielle L0-Fehler-Condition auslösen.
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    uart::puts("\n\n*** KERNEL PANIC ***\n");
+    if let Some(location) = info.location() {
+        uart::puts("Panic in ");
+        uart::puts(location.file());
+        uart::puts(":");
+        // TODO: integer to string conversion for line number
+        // uart::puts(location.line()); 
+        uart::puts("\n");
+        // uart::puts(info.message().unwrap()); // needs a formatter
+    } else {
+        uart::puts("Panic, aber keine genaue Location.\n");
+    }
     loop {}
 }

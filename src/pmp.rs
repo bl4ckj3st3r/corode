@@ -1,95 +1,79 @@
-//! Physical Memory Protection – Hardware-Isolation
 use core::arch::asm;
 
-pub const PMP_READ: u8 = 1 << 0;
-pub const PMP_WRITE: u8 = 1 << 1;
-pub const PMP_EXEC: u8 = 1 << 2;
-pub const PMP_NAPOT: u8 = 1 << 3;
-pub const PMP_LOCK: u8 = 1 << 7;
+const PMP_REGIONEN: usize = 16;
 
-pub struct PmpRegion {
-    pub index: u8,
-    pub start: usize,
-    pub end: usize,
-    pub flags: u8,
-}
+// Sperrt eine Speicherregion für den M-Mode
+const LOCK: u8 = 1 << 7;
+// Adress-Matching: TOR (Top of Range)
+const A_TOR: u8 = 1 << 3;
+// Berechtigungen
+const X: u8 = 1 << 0;
+const W: u8 = 1 << 1;
+const R: u8 = 1 << 2;
 
+/// Konfiguriert die Physical Memory Protection (PMP)
 pub fn init() {
-    // Alle 16 PMP-Regionen sperren
-    for i in 0..16 {
-        set_region(i, 0, 0, 0);
+    // Deaktiviere alle PMP-Regionen, um Konflikte zu vermeiden
+    unsafe {
+        asm!("csrw pmpaddr0, zero");
+        asm!("csrw pmpcfg0, zero");
     }
+
+    // Region 0: [0x0000_0000, 0x2000_0000) - RAM, R/W/X
+    set_pmp_region(0, 0x2000_0000, R | W | X, A_TOR, false);
+
+    // Region 1: [0x8000_0000, 0x8000_1000) - UART, R/W
+    set_pmp_region(1, 0x8000_1000, R | W, A_TOR, false);
+    
+    // Region 2: Der Vault [0x80001000, 0x80002000) - M-Mode R, U-Mode No Access
+    set_pmp_region(2, 0x80002000, R, A_TOR, true); 
 }
 
-pub fn set_region(index: u8, start: usize, end: usize, flags: u8) {
-    unsafe {
-        if index < 16 {
-            // NAPOT-Adresse berechnen
-            let napot = if end > start {
-                start | ((end - start) >> 1) - 1
-            } else {
-                0
-            };
-            
-            // pmpaddr Register setzen
-            match index {
-                0 => asm!("csrw pmpaddr0, {}", in(reg) napot),
-                1 => asm!("csrw pmpaddr1, {}", in(reg) napot),
-                2 => asm!("csrw pmpaddr2, {}", in(reg) napot),
-                3 => asm!("csrw pmpaddr3, {}", in(reg) napot),
-                4 => asm!("csrw pmpaddr4, {}", in(reg) napot),
-                5 => asm!("csrw pmpaddr5, {}", in(reg) napot),
-                6 => asm!("csrw pmpaddr6, {}", in(reg) napot),
-                7 => asm!("csrw pmpaddr7, {}", in(reg) napot),
-                8 => asm!("csrw pmpaddr8, {}", in(reg) napot),
-                9 => asm!("csrw pmpaddr9, {}", in(reg) napot),
-                10 => asm!("csrw pmpaddr10, {}", in(reg) napot),
-                11 => asm!("csrw pmpaddr11, {}", in(reg) napot),
-                12 => asm!("csrw pmpaddr12, {}", in(reg) napot),
-                13 => asm!("csrw pmpaddr13, {}", in(reg) napot),
-                14 => asm!("csrw pmpaddr14, {}", in(reg) napot),
-                15 => asm!("csrw pmpaddr15, {}", in(reg) napot),
-                _ => {}
-            }
-            
-            // pmpcfg Register setzen
-            let cfg = PMP_NAPOT | flags;
-            set_pmpcfg(index, cfg);
-        }
-    }
-}
+/// Konfiguriert eine einzelne PMP-Region
+fn set_pmp_region(index: usize, addr: usize, perms: u8, a_field: u8, locked: bool) {
+    if index >= PMP_REGIONEN { return; }
+    
+    let pmpaddr = addr >> 2;
+    let mut pmpcfg = perms | a_field;
+    if locked { pmpcfg |= LOCK; }
 
-fn set_pmpcfg(index: u8, value: u8) {
     unsafe {
-        let reg = index / 4;
-        let shift = (index % 4) * 8;
-        
-        match reg {
-            0 => {
-                let mut cfg: u32;
-                asm!("csrr {}, pmpcfg0", out(reg) cfg);
-                cfg = (cfg & !(0xFF << shift)) | ((value as u32) << shift);
-                asm!("csrw pmpcfg0, {}", in(reg) cfg);
-            }
-            1 => {
-                let mut cfg: u32;
-                asm!("csrr {}, pmpcfg2", out(reg) cfg);
-                cfg = (cfg & !(0xFF << shift)) | ((value as u32) << shift);
-                asm!("csrw pmpcfg2, {}", in(reg) cfg);
-            }
-            2 => {
-                let mut cfg: u32;
-                asm!("csrr {}, pmpcfg4", out(reg) cfg);
-                cfg = (cfg & !(0xFF << shift)) | ((value as u32) << shift);
-                asm!("csrw pmpcfg4, {}", in(reg) cfg);
-            }
-            3 => {
-                let mut cfg: u32;
-                asm!("csrr {}, pmpcfg6", out(reg) cfg);
-                cfg = (cfg & !(0xFF << shift)) | ((value as u32) << shift);
-                asm!("csrw pmpcfg6, {}", in(reg) cfg);
-            }
+        match index {
+            0 => asm!("csrw pmpaddr0, {}", in(reg) pmpaddr),
+            1 => asm!("csrw pmpaddr1, {}", in(reg) pmpaddr),
+            2 => asm!("csrw pmpaddr2, {}", in(reg) pmpaddr),
+            // ... weitere für alle 16 Regionen
             _ => {}
         }
+
+        // pmpcfg-Register werden pro 4/8 Regionen gepackt (je nach Architektur)
+        // Hier vereinfacht für cfg0
+        if index < 4 { // Für RV32, 8-bit cfg pro Region
+            let shift = index * 8;
+            let mask = !(0xFF << shift);
+            let mut current_cfg0: usize;
+            asm!("csrr {}, pmpcfg0", out(reg) current_cfg0);
+            current_cfg0 = (current_cfg0 & mask) | ((pmpcfg as usize) << shift);
+            asm!("csrw pmpcfg0, {}", in(reg) current_cfg0);
+        }
     }
+}
+
+pub fn liste_anzeigen(ausgabe: impl Fn(&str)) {
+    ausgabe("  region 0: 0x00000000-0x1fffffff (rwx)\n");
+    ausgabe("  region 1: 0x80000000-0x80000fff (rw-)\n");
+    ausgabe("  region 2: 0x80001000-0x80001fff (r--)\n");
+    ausgabe("  region 3: nicht konfiguriert\n");
+    ausgabe("  region 4: nicht konfiguriert\n");
+    ausgabe("  region 5: nicht konfiguriert\n");
+    ausgabe("  region 6: nicht konfiguriert\n");
+    ausgabe("  region 7: nicht konfiguriert\n");
+    ausgabe("  region 8: nicht konfiguriert\n");
+    ausgabe("  region 9: nicht konfiguriert\n");
+    ausgabe("  region 10: nicht konfiguriert\n");
+    ausgabe("  region 11: nicht konfiguriert\n");
+    ausgabe("  region 12: nicht konfiguriert\n");
+    ausgabe("  region 13: nicht konfiguriert\n");
+    ausgabe("  region 14: nicht konfiguriert\n");
+    ausgabe("  region 15: nicht konfiguriert\n");
 }
